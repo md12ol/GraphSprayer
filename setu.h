@@ -13,8 +13,8 @@ using namespace std;
 #define SETINCR 10
 
 #define dna_len (int)128
-#define max_vars (int)64
-#define max_len (int)128
+#define max_vars (int)512
+#define max_len (int)512
 
 //fitness proportional selector used in simulations
 int rselect(double *v, double ttl, int N);
@@ -112,11 +112,11 @@ public:
     int infected(int n, double alpha); //SIR utility routine
     void varInfected(bitset<dna_len> &immunity,
                      vector<pair<int, bitset<dna_len>>> &strains,
-                     double alpha, int &str_id);
+                     double valphas[], int &str_id, int inf_hist[]);
 
     static void create_new_variant(bitset<dna_len> &orig,
                                    bitset<dna_len> &variant, vector<int> rv,
-                                   int low_bnd, int up_bnd);
+                                   int low_bnd, int up_bnd, double orig_alpha, double alpha_change, double &new_alpha);
 
     //initializers
     void empty(int n);            //empty graph
@@ -201,9 +201,9 @@ public:
      */
     void SIR(int p0, int &max, int &len, int &ttl, double alpha, vector<int> &prof); //SIR method
     void SIRProfile(int p0, int &max, int &len, int &ttl, double alpha, double *prof); //Sir Method, with profile
-    // TODO: ADD alpha_change
-    void varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> variants[], int *vorigs, pair<int, int> vtimes[],
-           double alpha, int lB, int uB, double var_prob, int init_bits);
+    void varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> variants[],
+                int *vorigs, pair<int, int> vtimes[], double alpha, int lB, int uB, double var_prob,
+                int init_bits, double alpha_change, double valphas[], int inf_hist[]);
 
     /*SIRr is the same as SIR except that patient zero is assigned at random*/
     void SIRr(int &max, int &len, int &ttl, double alpha); //SIR method

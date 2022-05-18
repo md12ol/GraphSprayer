@@ -1547,8 +1547,7 @@ int graph::MaxCol() {//report the maximal color
 
 }
 
-void
-graph::DiffChar(int v, double omega, double *dc) {//diffusion character at v
+void graph::DiffChar(int v, double omega, double *dc) {//diffusion character at v
 
     double *sm;    //summation buffer
     int i, j, t;     //index variables
@@ -1682,12 +1681,13 @@ void graph::SIR(int p0, int &max, int &len, int &ttl, double alpha,
     delete[] nin;  //return storage for nin buffer
 }
 
-void
-graph::create_new_variant(bitset<dna_len> &orig, bitset<dna_len> &variant, vector<int> rv, int low_bnd, int up_bnd) {
+void graph::create_new_variant(bitset<dna_len> &orig, bitset<dna_len> &variant, vector<int> rv, int low_bnd,
+                               int up_bnd, double orig_alpha, double alpha_change, double &new_alpha) {
     // Randomness
     unsigned seed = chrono::system_clock::now().time_since_epoch().count();
     shuffle(rv.begin(), rv.end(), default_random_engine(seed));
     int num_edits = (int) lrand48() % (up_bnd - low_bnd) + low_bnd;
+    double change = (double) drand48() * (2 * alpha_change) - alpha_change;
 
     // Copy
     variant = orig;
@@ -1696,6 +1696,8 @@ graph::create_new_variant(bitset<dna_len> &orig, bitset<dna_len> &variant, vecto
     for (int i = 0; i < num_edits; i++) {
         variant.flip(rv.at(i));
     }
+
+    new_alpha = orig_alpha + change;
 }
 
 struct sort_pred {
@@ -1705,27 +1707,29 @@ struct sort_pred {
     }
 };
 
-// TODO: ADD alpha_change
-void graph::varInfected(bitset<dna_len> &immunity, vector<pair<int, bitset<dna_len>>> &strains, double alpha, int &str_id) {
-    int one_cnt;
+void graph::varInfected(bitset<dna_len> &immunity, vector<pair<int, bitset<dna_len>>> &strains,
+                        double valphas[], int &str_id, int inf_hist[]) {
     int potent_ones;
-    int max_ones = 0;
-    int worst_str = 0;
     immunity.flip();
     vector<pair<double, pair<int, bitset<dna_len>>>> serv_strains;
     // Find worst strain
     for (auto &strain: strains) {
-        one_cnt = (int) strain.second.count();
         bitset<dna_len> tmp = strain.second & immunity;
         potent_ones = (int) tmp.count();
-        serv_strains.emplace_back((double) one_cnt / potent_ones, (strain));
+        if (potent_ones > 0) {
+            serv_strains.emplace_back(valphas[strain.first], (strain));
+        }
     }
     immunity.flip();
 
     sort(serv_strains.rbegin(), serv_strains.rend(), sort_pred());
     for (auto &strain: serv_strains) {
-        // TODO: ADD alpha_change
-        if (infected(1, strain.first * alpha) == 1) {
+        if (infected(1, strain.first) == 1) {
+            immunity.flip();
+            bitset<dna_len> tmp = strain.second.second & immunity;
+            potent_ones = (int) tmp.count();
+            immunity.flip();
+            inf_hist[potent_ones] += 1;
             str_id = strain.second.first;
             return (void) "DONE";
         }
@@ -1733,9 +1737,9 @@ void graph::varInfected(bitset<dna_len> &immunity, vector<pair<int, bitset<dna_l
 }
 
 //Sir w Variants
-// TODO: ADD alpha_change, ADD valphas
 void graph::varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> variants[], int vorigs[],
-                   pair<int, int> vtimes[], double alpha, int lB, int uB, double var_prob, int init_bits) {
+                   pair<int, int> vtimes[], double alpha, int lB, int uB, double var_prob, int init_bits,
+                   double alpha_change, double valphas[], int inf_hist[]) {
     if ((V == 0) || (p0 < 0) || (p0 >= V))return;
 
     int NI;     //number of infected individuals
@@ -1760,9 +1764,10 @@ void graph::varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> vari
     randVec.reserve(dna_len);
     for (int i = 0; i < dna_len; i++) {
         randVec.push_back(i);
+        inf_hist[i] = 0;
     }
     unsigned seed = chrono::system_clock::now().time_since_epoch().count();
-    shuffle(randVec.begin(), randVec.end(),default_random_engine(seed));
+    shuffle(randVec.begin(), randVec.end(), default_random_engine(seed));
 
     // Make initial variant
     for (int i = 0; i < init_bits; i++) {
@@ -1776,6 +1781,7 @@ void graph::varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> vari
         vtimes[i].first = -1;
         vtimes[i].second = -1;
         new_inf[i] = 0;
+        valphas[i] = -1;
     }
 
     vcnt = 0;
@@ -1787,6 +1793,7 @@ void graph::varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> vari
     vtimes[0].first = 0;
     vprofs[0].push_back(1);
     vorigs[0] = -1;
+    valphas[0] = alpha;
     inf_neigh.reserve(V);
     immunity[0] = variants[0];
 
@@ -1820,7 +1827,7 @@ void graph::varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> vari
                 }
 
                 strain_id = -1;
-                varInfected(immunity[node], strains, alpha, strain_id);
+                varInfected(immunity[node], strains, valphas, strain_id, inf_hist);
 
                 // Infected and update immunity
                 if (strain_id != -1) { // Infected with inf_strain
@@ -1834,7 +1841,8 @@ void graph::varSIR(int p0, int &vcnt, vector<int> vprofs[], bitset<dna_len> vari
                         }
                         create_new_variant(variants[strain_id],
                                            variants[vcnt],
-                                           randVec, lB, uB);
+                                           randVec, lB, uB, valphas[strain_id],
+                                           alpha_change, valphas[vcnt]);
                         new_inf[vcnt]++;
                         inf_with[node] = vcnt;
                         immunity[node] = immunity[node] | variants[vcnt];

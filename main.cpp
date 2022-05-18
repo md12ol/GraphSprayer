@@ -22,12 +22,12 @@ using namespace std;
 #define ftl ((int)NSE*10)   //  Final test length
 #define verbose true
 #define runs 30
-#define mevs 1000
+#define mevs 10000
 #define RIs 100
 #define RE ((long)mevs/RIs)
 #define popsize 50
 #define verts 256
-#define RNS 91207819
+//#define RNS 91207819
 #define MNM 2
 #define tsize 7
 
@@ -48,6 +48,7 @@ int b_epi[popsize];
 int dx[popsize];                // Sorting index
 bool mde_spread;
 int fitFun;
+int RNS;
 
 // Variants
 int var_count;
@@ -57,12 +58,13 @@ vector<int> bestEpi_varProfs[max_vars];
 int bestEpi_varCount;
 int bestEpi_varParents[max_vars];
 bitset<dna_len> bestEpi_varDNA[max_vars];
+double bestEpi_varAlphas[max_vars];
+int bestEpi_infHist[dna_len];
 double var_prob;
 int edit_lowB;
 int edit_upB;
 int init_bits;
 
-// TODO: ADD THE FOLLOWING
 double alpha_change = 0.05; // Try 0.05, 0.1, 0.15?
 // TODO: Mild v. Severe infections (histogram of differences between variants and immunity strings)
 
@@ -82,13 +84,13 @@ void createUpTri(bitspray &A, int *upTri);  //tbd
 /****************************Main Routine*******************************/
 int main(int argc, char *argv[]) {
     /**
-     * Output Root, Initial Bits, Var Prob, Edit LowB, Edit UpB, Len (0) or Spread (1)
-     * nohup ./GraphSprayer "./Out/" ? ? ? ? ? &
+     * Output Root, Initial Bits, Var Prob, Edit LowB, Edit UpB, Len (0) or Spread (1), AlphaChange, RNS/Run#
+     * nohup ./GraphSprayer "./Out/" ? ? ? ? ? ? ? &
      */
 
     fstream stat, best, dchar, readme, iGOut;   //statistics, best structures
     char fn[60];                                //file name construction buffer
-    char *outLoc = new char[45];
+    char *outLoc = new char[200];
     char *outRoot = argv[1];
 
     init_bits = (int) strtol(argv[2], nullptr, 10);
@@ -97,30 +99,34 @@ int main(int argc, char *argv[]) {
     edit_upB = (int) strtol(argv[5], nullptr, 10);
     //  F -> Epidemic Length; T -> Epidemic Spread
     fitFun = (int) strtol(argv[6], nullptr, 10);
+    alpha_change = strtod(argv[7], nullptr);
+    RNS = (int) strtol(argv[8], nullptr, 10);
 
     // Create directory for output
     if (fitFun == 1) {
-        sprintf(outLoc, "%sOutput - ES %03dP, %02dI, %.4f%%, %02d-%02dE/",
-                outRoot, popsize, init_bits, var_prob, edit_lowB, edit_upB);
+        sprintf(outLoc,  "%sOutput - ES %.2fC, %02dI, %.4f%%, %02d-%02dE/",
+                 outRoot, alpha_change, init_bits, var_prob, edit_lowB, edit_upB);
     } else {
-        sprintf(outLoc, "%sOutput - EL %03dP, %02dI, %.4f%%, %02d-%02dE/",
-                outRoot, popsize, init_bits, var_prob, edit_lowB, edit_upB);
+        sprintf(outLoc,  "%sOutput - EL %.2fC, %02dI, %.4f%%, %02d-%02dE/",
+                 outRoot, alpha_change, init_bits, var_prob, edit_lowB, edit_upB);
     }
 
     mkdir(outLoc, 0777);
 
     initalg();
 
-    sprintf(fn, "%sbest.dat", outLoc);
+    sprintf(fn, "%sbest%02d.dat", outLoc, RNS);
     best.open(fn, ios::out);
 
     sprintf(fn, "%sdifc.dat", outLoc);
     dchar.open(fn, ios::out);
 
-    sprintf(fn, "%sreadme.dat", outLoc);
-    readme.open(fn, ios::out);
-    createReadMe(readme);
-    readme.close();
+    if (RNS == 0){
+        sprintf(fn, "%sreadme.dat", outLoc);
+        readme.open(fn, ios::out);
+        createReadMe(readme);
+        readme.close();
+    }
 
     if (verbose) {
         cmdLineIntro(cout);
@@ -129,7 +135,7 @@ int main(int argc, char *argv[]) {
         cout << "Started" << endl;
     }
 
-    for (int run = 0; run < runs; run++) {
+    for (int run = RNS; run < RNS + 1; run++) {
         sprintf(fn, "%srun%02d.dat", outLoc, run); // File name
         stat.open(fn, ios::out);
         if (verbose)cmdLineRun(run, cout);
@@ -174,7 +180,7 @@ void createReadMe(ostream &aus) {
     aus << "Number of sample epidemics: " << NSE << endl;
     aus << "Final Test Length: " << ftl << endl;
     aus << "Alpha: " << alpha << endl;
-    // TODO: ADD alpha_change
+    aus << "Alpha Change: " << alpha_change << endl;
     aus << "Minimum epidemic length: " << mepl << endl;
     aus << "Re-tries for short epidemics: " << rse << endl;
     aus << "Runs: " << runs << endl;
@@ -228,6 +234,9 @@ void initalg() {//initialize the algorithm
     for (auto &i: bPop) {
         i = new bitspray(states);
     }
+    for (int i = 0; i < max_vars; i++){
+        bestEpi_varProfs[i].reserve(max_len);
+    }
 }
 
 bool necroticFilter(const int *upTri) {
@@ -270,16 +279,16 @@ double fitness(int *upTri, int idx, bool final) {//compute the fitness
     vector<double> v_spreads;
     v_spreads.clear();
     v_spreads.reserve(NSE);
-    // TODO: ADD valphas
+    double valphas[max_vars];
+    int inf_hist[dna_len];
 
     if (fitFun == 0) { //  Epidemic length
         for (en = 0; en < (final ? ftl : NSE); en++) {
             cnt = 0;
             do {
-                // TODO: ADD alpha_change
                 G.varSIR(0, var_count, var_profs, variants,
                          var_parents, var_lens, 0.5,
-                         edit_lowB, edit_upB, var_prob, init_bits);
+                         edit_lowB, edit_upB, var_prob, init_bits, alpha_change, valphas, inf_hist);
                 v_lengths.clear();
                 for (int i = 0; i <= var_count; i++) {
                     v_lengths.push_back((double) (var_lens[i].second));
@@ -291,13 +300,17 @@ double fitness(int *upTri, int idx, bool final) {//compute the fitness
             if (final) {
                 if (len > best_epi) {
                     best_epi = len;
+                    bestEpi_varCount = var_count;
                     for (int i = 0; i <= var_count; i++) {
-                        bestEpi_varCount = var_count;
                         bestEpi_varStart[i] = var_lens[i].first;
                         bestEpi_varEnd[i] = var_lens[i].second;
                         bestEpi_varProfs[i] = var_profs[i];
                         bestEpi_varParents[i] = var_parents[i];
                         bestEpi_varDNA[i] = variants[i];
+                        bestEpi_varAlphas[i] = valphas[i];
+                    }
+                    for (int i = 0; i < dna_len; i++){
+                        bestEpi_infHist[i] = inf_hist[i];
                     }
                 }
                 accu = -1;
@@ -320,10 +333,9 @@ double fitness(int *upTri, int idx, bool final) {//compute the fitness
         for (en = 0; en < (final ? ftl : NSE); en++) {
             cnt = 0;
             do {
-                // TODO: ADD alpha_change
                 G.varSIR(0, var_count, var_profs, variants,
                          var_parents, var_lens, 0.5,
-                         edit_lowB, edit_upB, var_prob, init_bits);
+                         edit_lowB, edit_upB, var_prob, init_bits, alpha_change, valphas, inf_hist);
                 v_lengths.clear();
                 ttl = 0;
                 for (int i = 0; i <= var_count; i++) {
@@ -337,13 +349,17 @@ double fitness(int *upTri, int idx, bool final) {//compute the fitness
             if (final) {
                 if (ttl > best_epi) {
                     best_epi = ttl;
-                    for (int i = 0; i < max_vars; i++) {
-                        bestEpi_varCount = var_count;
+                    bestEpi_varCount = var_count;
+                    for (int i = 0; i <= var_count; i++) {
                         bestEpi_varStart[i] = var_lens[i].first;
                         bestEpi_varEnd[i] = var_lens[i].second;
                         bestEpi_varProfs[i] = var_profs[i];
                         bestEpi_varParents[i] = var_parents[i];
                         bestEpi_varDNA[i] = variants[i];
+                        bestEpi_varAlphas[i] = valphas[i];
+                    }
+                    for (int i = 0; i < dna_len; i++){
+                        bestEpi_infHist[i] = inf_hist[i];
                     }
                 }
                 accu = -1;
@@ -544,8 +560,14 @@ void reportbest(ostream &aus, ostream &difc) {//report the best graph
     }
     for (int i = 0; i <= bestEpi_varCount; i++) {
         aus << "V" << i << "\t";
+        aus << "a=" << bestEpi_varAlphas[i] << '\t';
         aus << bestEpi_varDNA[i] << endl;
     }
+    aus << "HIST" << '\t';
+    for (int i = 0; i < dna_len; i++) {
+        aus << bestEpi_infHist[i] << '\t';
+    }
+    aus << endl;
 
     // Write the SDA
     aus << "Self-Driving Automata" << endl;
